@@ -1,9 +1,13 @@
-const express= require("express");
-const cors= require("cors");
-const app= express();
-const port=process.env.PORT||4000;
+const express = require("express");
+const cors = require("cors");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const app = express();
+const port = process.env.PORT || 4000;
 require("dotenv").config();
-const { MongoClient, ServerApiVersion,ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
 const uri = "mongodb+srv://tasfiquecse21701008_db_user:fLF6jiRUf27mFB41@cusap.crapgyu.mongodb.net/?appName=cusap";
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -14,104 +18,213 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
-//middleware
+
+// Middleware
 app.use(express.json());
 app.use(cors());
+app.use('/uploads', express.static('uploads')); // Serve static files from uploads directory
 
-//fLF6jiRUf27mFB41
-//tasfiquecse21701008_db_user
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    // Create uploads directory if it doesn't exist
+    const uploadDir = 'uploads';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Create unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: function (req, file, cb) {
+    // Check if file is an image
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 async function run() {
   try {
-     await client.connect();
+    await client.connect();
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
 
+    const memberCollection = client.db("cusapDB").collection("members");
+    const commentCollection = client.db("cusapDB").collection("comments");
 
-const memberCollection = client.db("cusapDB").collection("members");
-app.post("/member", async (req, res) => {
-      const newMember = req.body;
-      console.log(newMember);
-      const result = await memberCollection.insertOne(newMember);
-      res.send(result);
+    // Image upload endpoint
+    app.post("/upload", upload.single('photo'), async (req, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).send({ message: 'No file uploaded.' });
+        }
+        
+        // Construct the image URL
+        const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+        
+        res.send({ 
+          success: true,
+          imageUrl: imageUrl,
+          filename: req.file.filename
+        });
+      } catch (error) {
+        console.error('Upload error:', error);
+        res.status(500).send({ message: 'Error uploading file' });
+      }
     });
 
-app.get('/member',async(req,res)=>{
-    const cursor=memberCollection.find();
-    const result= await cursor.toArray();
-    res.send(result);
-})
+    // POST - Create new member
+    app.post("/member", async (req, res) => {
+      try {
+        const newMember = req.body;
+        console.log("New member:", newMember);
+        const result = await memberCollection.insertOne(newMember);
+        res.send(result);
+      } catch (error) {
+        console.error("Error creating member:", error);
+        res.status(500).send({ message: 'Error creating member' });
+      }
+    });
 
-app.get('/member/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const member = await memberCollection.findOne({ _id: new ObjectId(id) });
-    if (!member) {
-      return res.status(404).send({ message: 'Member not found' });
-    }
-    res.send(member);
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: 'Server error' });
-  }
-});
+    // GET - All members
+    app.get('/member', async (req, res) => {
+      try {
+        const cursor = memberCollection.find();
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        console.error("Error fetching members:", error);
+        res.status(500).send({ message: 'Error fetching members' });
+      }
+    });
 
-app.delete('/member/:id', async(req,res)=>{
-  const id=req.params.id;
-  const query ={_id: new ObjectId(id)}
-  const result=await memberCollection.deleteOne(query);
-  res.send(result);
-}) 
+    // GET - Single member by ID
+    app.get('/member/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const member = await memberCollection.findOne({ _id: new ObjectId(id) });
+        if (!member) {
+          return res.status(404).send({ message: 'Member not found' });
+        }
+        res.send(member);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: 'Server error' });
+      }
+    });
 
-//update korar jonno
+    // DELETE - Member by ID
+    app.delete('/member/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        
+        // Get member data to delete associated image
+        const member = await memberCollection.findOne(query);
+        if (member && member.photo && member.photo.includes('/uploads/')) {
+          const filename = member.photo.split('/').pop();
+          const filePath = path.join(__dirname, 'uploads', filename);
+          
+          // Delete the image file
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        }
+        
+        const result = await memberCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        console.error("Error deleting member:", error);
+        res.status(500).send({ message: 'Error deleting member' });
+      }
+    });
 
-app.get('/member/:id',async(req,res)=>{
-  const id=req.params.id;
-  const query={_id: new ObjectId(id)}
-  const result =await memberCollection.findOne(query)
-  res.send(result)
-})
+    // PUT - Update member by ID
+    app.put('/member/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const options = { upsert: true };
+        const updatedMember = req.body;
 
-app.put('/member/:id',async(req,res)=>{
-  const id=req.params.id;
-  const filter={_id : new ObjectId(id)}
-  const options={upsert: true};
-  const updatedMember= req.body;
+        const member = {
+          $set: {
+            name: updatedMember.name, 
+            photo: updatedMember.photo,
+            blood: updatedMember.blood, 
+            union: updatedMember.union,
+            studentId: updatedMember.studentId,
+            department: updatedMember.department,
+            session: updatedMember.session,
+            mobile: updatedMember.mobile,
+          }
+        };
+        const result = await memberCollection.updateOne(filter, member, options);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating member:", error);
+        res.status(500).send({ message: 'Error updating member' });
+      }
+    });
 
-  const member={
-    $set:{
-      name: updatedMember.name , 
-      photo: updatedMember.photo, 
-      blood:updatedMember.blood, 
-      union:updatedMember.union,
-      studentId:updatedMember.studentId,
-      department:updatedMember.department,
-      session:updatedMember.session,
-      mobile:updatedMember.mobile,
-    }
-  }
-  const result=await memberCollection.updateOne(filter,member,options);
-  res.send(result);
-})
+    // Comments endpoints
+    app.post("/comment", async (req, res) => {
+      try {
+        const newComment = req.body;
+        console.log("Received Comment:", newComment);
+        const result = await commentCollection.insertOne(newComment);
+        res.send(result);
+      } catch (error) {
+        console.error("Error creating comment:", error);
+        res.status(500).send({ message: 'Error creating comment' });
+      }
+    });
 
+    app.get("/comment", async (req, res) => {
+      try {
+        const comments = await commentCollection.find().toArray();
+        res.send(comments);
+      } catch (error) {
+        console.error("Error fetching comments:", error);
+        res.status(500).send({ message: 'Error fetching comments' });
+      }
+    });
 
-
-
-
-
+    // Error handling for file uploads
+    app.use((error, req, res, next) => {
+      if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).send({ message: 'File too large. Maximum size is 5MB.' });
+        }
+      }
+      res.status(500).send({ message: error.message });
+    });
 
   } finally {
     // Ensures that the client will close when you finish/error
-  
+    // await client.close();
   }
 }
+
 run().catch(console.dir);
 
-
-
-
-app.get('/',(req, res)=>{
-     res.send("hello!! cusap server is running");
+// Basic routes
+app.get('/', (req, res) => {
+  res.send("Hello!! CUSAP server is running");
 });
-app.listen(port,()=>{
-    console.log(`server is running on port: ${port}`);
+
+app.listen(port, () => {
+  console.log(`Server is running on port: ${port}`);
 });
