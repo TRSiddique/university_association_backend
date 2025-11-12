@@ -344,6 +344,155 @@ app.post("/news", async (req, res) => {
       res.status(500).send({ message: error.message });
     });
 
+    const photoCollection = client.db("cusapDB").collection("photos");
+const videoCollection = client.db("cusapDB").collection("videos");
+
+// ========== PHOTO GALLERY ENDPOINTS ==========
+// POST - Upload photo
+app.post("/photos", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).send({ 
+        success: false,
+        message: "No image uploaded" 
+      });
+    }
+
+    const { title, description, date } = req.body;
+    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+
+    const newPhoto = {
+      title,
+      description,
+      url: imageUrl,
+      date: date ? new Date(date) : new Date(),
+      createdAt: new Date()
+    };
+
+    const result = await photoCollection.insertOne(newPhoto);
+    res.send({
+      success: true,
+      message: "Photo uploaded successfully",
+      data: { ...newPhoto, _id: result.insertedId }
+    });
+  } catch (error) {
+    console.error("Error uploading photo:", error);
+    res.status(500).send({ 
+      success: false,
+      message: "Error uploading photo" 
+    });
+  }
+});
+
+// GET - All photos
+app.get("/photos", async (req, res) => {
+  try {
+    const cursor = photoCollection.find().sort({ date: -1 });
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching photos:", error);
+    res.status(500).send({ message: "Error fetching photos" });
+  }
+});
+
+// DELETE - Photo by ID
+app.delete("/photos/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+
+    // Get photo data to delete associated image
+    const photo = await photoCollection.findOne(query);
+    if (photo && photo.url && photo.url.includes("/uploads/")) {
+      const filename = photo.url.split("/").pop();
+      const filePath = path.join(__dirname, "uploads", filename);
+
+      // Delete the image file
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    const result = await photoCollection.deleteOne(query);
+    res.send({
+      success: true,
+      message: "Photo deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting photo:", error);
+    res.status(500).send({ message: "Error deleting photo" });
+  }
+});
+
+// ========== VIDEO GALLERY ENDPOINTS ==========
+// POST - Add video link
+app.post("/videos", async (req, res) => {
+  try {
+    const { title, description, youtubeUrl, date } = req.body;
+
+    if (!title || !youtubeUrl) {
+      return res.status(400).send({ 
+        success: false,
+        message: "Title and YouTube URL are required" 
+      });
+    }
+
+    const newVideo = {
+      title,
+      description,
+      youtubeUrl,
+      date: date ? new Date(date) : new Date(),
+      createdAt: new Date()
+    };
+
+    const result = await videoCollection.insertOne(newVideo);
+    res.send({
+      success: true,
+      message: "Video added successfully",
+      data: { ...newVideo, _id: result.insertedId }
+    });
+  } catch (error) {
+    console.error("Error adding video:", error);
+    res.status(500).send({ 
+      success: false,
+      message: "Error adding video" 
+    });
+  }
+});
+
+// GET - All videos
+app.get("/videos", async (req, res) => {
+  try {
+    const cursor = videoCollection.find().sort({ date: -1 });
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching videos:", error);
+    res.status(500).send({ message: "Error fetching videos" });
+  }
+});
+
+// DELETE - Video by ID
+app.delete("/videos/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await videoCollection.deleteOne(query);
+    res.send({
+      success: true,
+      message: "Video deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting video:", error);
+    res.status(500).send({ message: "Error deleting video" });
+  }
+});
+
+
+
+
+
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
