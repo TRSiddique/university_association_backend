@@ -7,7 +7,7 @@ const app = express();
 const port = process.env.PORT || 4000;
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
+//const formRoutes = require('./routes/formRoutes');
 const uri =
   "mongodb+srv://tasfiquecse21701008_db_user:fLF6jiRUf27mFB41@cusap.crapgyu.mongodb.net/?appName=cusap";
 
@@ -528,7 +528,176 @@ app.delete("/videos/:id", async (req, res) => {
   }
 });
 
+// This code goes INSIDE your index.js run() function
+// Add it after your other collections and before your existing routes
 
+// Form collections
+const formCollection = client.db("cusapDB").collection("forms");
+const responseCollection = client.db("cusapDB").collection("responses");
+
+// ========== FORM ADMIN ROUTES ==========
+
+// Create a new form
+// Create a new form
+app.post('/api/admin/forms', async (req, res) => {
+  try {
+    const form = {
+      ...req.body,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    const result = await formCollection.insertOne(form);
+    res.status(201).json({ ...form, _id: result.insertedId });
+  } catch (error) {
+    console.error("Error creating form:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Get all forms (admin)
+app.get('/api/admin/forms', async (req, res) => {
+  try {
+    const forms = await formCollection.find().sort({ createdAt: -1 }).toArray();
+    res.json(forms);
+  } catch (error) {
+    console.error("Error fetching forms:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single form (admin)
+app.get('/api/admin/forms/:id', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid form ID' });
+    }
+    
+    const form = await formCollection.findOne({ _id: new ObjectId(req.params.id) });
+    if (!form) return res.status(404).json({ error: 'Form not found' });
+    res.json(form);
+  } catch (error) {
+    console.error("Error fetching form:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update form
+app.put('/api/admin/forms/:id', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid form ID' });
+    }
+    
+    const result = await formCollection.findOneAndUpdate(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { ...req.body, updatedAt: new Date() } },
+      { returnDocument: 'after' }
+    );
+    
+    if (!result.value) return res.status(404).json({ error: 'Form not found' });
+    res.json(result.value);
+  } catch (error) {
+    console.error("Error updating form:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Delete form
+app.delete('/api/admin/forms/:id', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid form ID' });
+    }
+    
+    const result = await formCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Form not found' });
+    }
+    res.json({ message: 'Form deleted successfully' });
+  } catch (error) {
+    console.error("Error deleting form:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get responses for a form
+app.get('/api/admin/forms/:id/responses', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid form ID' });
+    }
+    
+    const responses = await responseCollection
+      .find({ formId: req.params.id })
+      .sort({ submittedAt: -1 })
+      .toArray();
+    res.json(responses);
+  } catch (error) {
+    console.error("Error fetching responses:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== FORM PUBLIC ROUTES ==========
+
+// Get active form by ID (public)
+app.get('/api/public/forms/:id', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid form ID' });
+    }
+    
+    const form = await formCollection.findOne({ 
+      _id: new ObjectId(req.params.id), 
+      isActive: true 
+    });
+    
+    if (!form) return res.status(404).json({ error: 'Form not found' });
+    res.json(form);
+  } catch (error) {
+    console.error("Error fetching form:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Submit form response
+app.post('/api/public/forms/:id/submit', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid form ID' });
+    }
+    
+    const form = await formCollection.findOne({ 
+      _id: new ObjectId(req.params.id), 
+      isActive: true 
+    });
+    
+    if (!form) return res.status(404).json({ error: 'Form not found' });
+
+    // Log to debug
+    console.log('Form questions:', form.questions.map(q => q._id));
+    console.log('Received answers:', req.body.answers);
+
+    const response = {
+      formId: req.params.id,  // Store as string for easier querying
+      answers: req.body.answers,
+      submittedAt: new Date(),
+      ipAddress: req.ip
+    };
+    
+    const result = await responseCollection.insertOne(response);
+    console.log('Response saved:', result.insertedId);
+    
+    res.status(201).json({ 
+      message: 'Response submitted successfully',
+      responseId: result.insertedId 
+    });
+  } catch (error) {
+    console.error("Error submitting response:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
 
 
 
