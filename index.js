@@ -348,7 +348,34 @@ app.post("/news", async (req, res) => {
 const videoCollection = client.db("cusapDB").collection("videos");
 
 // ========== PHOTO GALLERY ENDPOINTS ==========
+// Add this function to your index.js
+const uploadToImageBB = async (imageBuffer, fileName) => {
+    const IMGBB_API_KEY = '32006f2a50e2265ea475805d6b074bf3'; // Your ImageBB API key
+    
+    const formData = new FormData();
+    const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
+    formData.append('image', blob, fileName);
+
+    try {
+        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+        
+        if (data.success) {
+            return data.data.url; // Returns ImageBB URL
+        } else {
+            throw new Error(data.error?.message || 'ImageBB upload failed');
+        }
+    } catch (error) {
+        console.error('ImageBB upload error:', error);
+        throw error;
+    }
+};
 // POST - Upload photo
+// Replace your current photo upload endpoint with this:
 app.post("/photos", upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
@@ -359,12 +386,18 @@ app.post("/photos", upload.single("image"), async (req, res) => {
     }
 
     const { title, description, date } = req.body;
-    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+
+    // Upload to ImageBB instead of local storage
+    const imageBuffer = fs.readFileSync(req.file.path);
+    const imageUrl = await uploadToImageBB(imageBuffer, req.file.originalname);
+
+    // Delete the local file after uploading to ImageBB
+    fs.unlinkSync(req.file.path);
 
     const newPhoto = {
       title,
       description,
-      url: imageUrl,
+      url: imageUrl, // This will be ImageBB URL
       date: date ? new Date(date) : new Date(),
       createdAt: new Date()
     };
@@ -372,14 +405,20 @@ app.post("/photos", upload.single("image"), async (req, res) => {
     const result = await photoCollection.insertOne(newPhoto);
     res.send({
       success: true,
-      message: "Photo uploaded successfully",
+      message: "Photo uploaded successfully to ImageBB",
       data: { ...newPhoto, _id: result.insertedId }
     });
   } catch (error) {
     console.error("Error uploading photo:", error);
+    
+    // Clean up local file if upload fails
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
     res.status(500).send({ 
       success: false,
-      message: "Error uploading photo" 
+      message: "Error uploading photo to ImageBB" 
     });
   }
 });
