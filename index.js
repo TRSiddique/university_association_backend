@@ -77,7 +77,7 @@ async function run() {
     // ========== CHANGED: Single upload endpoint for both 'photo' and 'image' ==========
     // Image upload endpoint - handles both 'photo' and 'image'
   // Image upload endpoint - handles file uploads
-app.post("/upload", upload.single("file"), async (req, res) => { // ========== CHANGE: Use "file" as field name ==========
+app.post("/upload", upload.single("photo"), async (req, res) => { // ========== CHANGE: Use "file" as field name ==========
     try {
         if (!req.file) {
             return res.status(400).send({ 
@@ -698,8 +698,63 @@ app.post('/api/public/forms/:id/submit', async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
-
-
+// DELETE - News by ID
+app.delete("/news/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    
+    const result = await newsCollection.deleteOne(query);
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ 
+        success: false,
+        message: "News not found" 
+      });
+    }
+    
+    res.send({
+      success: true,
+      message: "News deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting news:", error);
+    res.status(500).send({ 
+      success: false,
+      message: "Error deleting news" 
+    });
+  }
+});
+// index.js-এ যোগ করুন edit news
+app.put("/news/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updatedNews = req.body;
+    
+    const result = await newsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedNews }
+    );
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ 
+        success: false,
+        message: "News not found" 
+      });
+    }
+    
+    res.send({
+      success: true,
+      message: "News updated successfully"
+    });
+  } catch (error) {
+    console.error("Error updating news:", error);
+    res.status(500).send({ 
+      success: false,
+      message: "Error updating news" 
+    });
+  }
+});
 
   } finally {
     // Ensures that the client will close when you finish/error
