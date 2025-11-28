@@ -7,9 +7,8 @@ const app = express();
 const port = process.env.PORT || 4000;
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-//const formRoutes = require('./routes/formRoutes');
-const uri =
-  "mongodb+srv://tasfiquecse21701008_db_user:fLF6jiRUf27mFB41@cusap.crapgyu.mongodb.net/?appName=cusap";
+
+const uri = "mongodb+srv://tasfiquecse21701008_db_user:fLF6jiRUf27mFB41@cusap.crapgyu.mongodb.net/?appName=cusap";
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
@@ -20,17 +19,14 @@ const client = new MongoClient(uri, {
   },
 });
 
-// ========== CHANGED: Fixed duplicate middleware ==========
 // Middleware
-app.use(express.json({ limit: '50mb' })); // Increased limit for base64 images
+app.use(express.json({ limit: '50mb' }));
 app.use(cors());
-app.use("/uploads", express.static("uploads")); // Serve static files from uploads directory
-// ========== REMOVED: Duplicate middleware lines ==========
+app.use("/uploads", express.static("uploads"));
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    // Create uploads directory if it doesn't exist
     const uploadDir = "uploads";
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
@@ -38,19 +34,14 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    // Create unique filename with timestamp
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(
-      null,
-      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
-    );
+    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
   },
 });
 
 const upload = multer({
   storage: storage,
   fileFilter: function (req, file, cb) {
-    // Check if file is an image
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
@@ -65,69 +56,64 @@ const upload = multer({
 async function run() {
   try {
     await client.connect();
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    console.log("✓ Pinged your deployment. You successfully connected to MongoDB!");
 
     const memberCollection = client.db("cusapDB").collection("members");
     const commentCollection = client.db("cusapDB").collection("comments");
-    // ========== ADDED: News collection ==========
     const newsCollection = client.db("cusapDB").collection("news");
+    const photoCollection = client.db("cusapDB").collection("photos");
+    const videoCollection = client.db("cusapDB").collection("videos");
+    const formCollection = client.db("cusapDB").collection("forms");
+    const responseCollection = client.db("cusapDB").collection("responses");
 
-    // ========== CHANGED: Single upload endpoint for both 'photo' and 'image' ==========
-    // Image upload endpoint - handles both 'photo' and 'image'
-  // Image upload endpoint - handles file uploads
-app.post("/upload", upload.single("photo"), async (req, res) => { // ========== CHANGE: Use "file" as field name ==========
-    try {
+    // ========== CREATE DATABASE INDEXES FOR PERFORMANCE ==========
+    async function createIndexes() {
+      try {
+        await memberCollection.createIndex({ name: 1 });
+        await memberCollection.createIndex({ studentId: 1 });
+        await memberCollection.createIndex({ department: 1 });
+        await memberCollection.createIndex({ blood: 1 });
+        await memberCollection.createIndex({ session: 1 });
+        await memberCollection.createIndex({ union: 1 });
+        await newsCollection.createIndex({ date: -1 });
+        await photoCollection.createIndex({ date: -1 });
+        await videoCollection.createIndex({ date: -1 });
+        console.log('✓ Database indexes created successfully');
+      } catch (error) {
+        console.error('Error creating indexes:', error);
+      }
+    }
+    
+    await createIndexes();
+
+    // ========== IMAGE UPLOAD ENDPOINT ==========
+    app.post("/upload", upload.single("photo"), async (req, res) => {
+      try {
         if (!req.file) {
-            return res.status(400).send({ 
-                success: false,
-                message: "No file uploaded." 
-            });
+          return res.status(400).send({ 
+            success: false,
+            message: "No file uploaded." 
+          });
         }
 
-        // Construct the image URL
         const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
 
         res.send({
-            success: true,
-            imageUrl: imageUrl, // ========== This returns the URL string ==========
-            filename: req.file.filename,
+          success: true,
+          imageUrl: imageUrl,
+          filename: req.file.filename,
         });
-    } catch (error) {
+      } catch (error) {
         console.error("Upload error:", error);
         res.status(500).send({ 
-            success: false,
-            message: "Error uploading file" 
+          success: false,
+          message: "Error uploading file" 
         });
-    }
-});
-// ========== KEEP YOUR NEWS ENDPOINT AS IS (it already stores URL) ==========
-app.post("/news", async (req, res) => {
-    try {
-        const newNews = req.body;
-        console.log("New news:", newNews);
-        
-        // Add timestamp and default values
-        newNews.date = new Date();
-        newNews.views = 0;
-        newNews.status = 'published';
-        
-        const result = await newsCollection.insertOne(newNews);
-        res.send({
-            success: true,
-            message: 'News article created successfully',
-            data: result
-        });
-    } catch (error) {
-        console.error("Error creating news:", error);
-        res.status(500).send({ 
-            success: false,
-            message: 'Error creating news article' 
-        });
-    }
-});
+      }
+    });
 
+    // ========== MEMBER ENDPOINTS ==========
+    
     // POST - Create new member
     app.post("/member", async (req, res) => {
       try {
@@ -141,11 +127,27 @@ app.post("/news", async (req, res) => {
       }
     });
 
-    // GET - All members
+    // GET - All members (OPTIMIZED)
     app.get("/member", async (req, res) => {
       try {
-        const cursor = memberCollection.find();
+        // Project only necessary fields to reduce payload size
+        const cursor = memberCollection.find({}, {
+          projection: {
+            name: 1,
+            photo: 1,
+            blood: 1,
+            union: 1,
+            studentId: 1,
+            department: 1,
+            session: 1,
+            mobile: 1
+          }
+        });
+        
         const result = await cursor.toArray();
+        
+        // Add cache headers for better performance
+        res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
         res.send(result);
       } catch (error) {
         console.error("Error fetching members:", error);
@@ -182,7 +184,6 @@ app.post("/news", async (req, res) => {
           const filename = member.photo.split("/").pop();
           const filePath = path.join(__dirname, "uploads", filename);
 
-          // Delete the image file
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
           }
@@ -216,11 +217,7 @@ app.post("/news", async (req, res) => {
             mobile: updatedMember.mobile,
           },
         };
-        const result = await memberCollection.updateOne(
-          filter,
-          member,
-          options
-        );
+        const result = await memberCollection.updateOne(filter, member, options);
         res.send(result);
       } catch (error) {
         console.error("Error updating member:", error);
@@ -228,7 +225,8 @@ app.post("/news", async (req, res) => {
       }
     });
 
-    // Comments endpoints
+    // ========== COMMENT ENDPOINTS ==========
+    
     app.post("/comment", async (req, res) => {
       try {
         const newComment = req.body;
@@ -251,14 +249,14 @@ app.post("/news", async (req, res) => {
       }
     });
 
-    // ========== ADDED: News endpoints ==========
+    // ========== NEWS ENDPOINTS ==========
+    
     // POST - Create new news article
     app.post("/news", async (req, res) => {
       try {
         const newNews = req.body;
         console.log("New news:", newNews);
         
-        // Add timestamp and default values
         newNews.date = new Date();
         newNews.views = 0;
         newNews.status = 'published';
@@ -297,12 +295,11 @@ app.post("/news", async (req, res) => {
       }
     });
 
-    // ========== ADDED: Get single news article by ID ==========
+    // GET - Single news article by ID
     app.get('/news/:id', async (req, res) => {
       try {
         const id = req.params.id;
         
-        // Validate ObjectId
         if (!ObjectId.isValid(id)) {
           return res.status(400).send({ 
             success: false,
@@ -332,429 +329,415 @@ app.post("/news", async (req, res) => {
       }
     });
 
-    // Error handling for file uploads
-    app.use((error, req, res, next) => {
-      if (error instanceof multer.MulterError) {
-        if (error.code === "LIMIT_FILE_SIZE") {
-          return res
-            .status(400)
-            .send({ message: "File too large. Maximum size is 5MB." });
+    // PUT - Update news by ID
+    app.put("/news/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedNews = req.body;
+        
+        const result = await newsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedNews }
+        );
+        
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ 
+            success: false,
+            message: "News not found" 
+          });
         }
+        
+        res.send({
+          success: true,
+          message: "News updated successfully"
+        });
+      } catch (error) {
+        console.error("Error updating news:", error);
+        res.status(500).send({ 
+          success: false,
+          message: "Error updating news" 
+        });
       }
-      res.status(500).send({ message: error.message });
     });
 
-    const photoCollection = client.db("cusapDB").collection("photos");
-const videoCollection = client.db("cusapDB").collection("videos");
+    // DELETE - News by ID
+    app.delete("/news/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        
+        const result = await newsCollection.deleteOne(query);
+        
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ 
+            success: false,
+            message: "News not found" 
+          });
+        }
+        
+        res.send({
+          success: true,
+          message: "News deleted successfully"
+        });
+      } catch (error) {
+        console.error("Error deleting news:", error);
+        res.status(500).send({ 
+          success: false,
+          message: "Error deleting news" 
+        });
+      }
+    });
 
-// ========== PHOTO GALLERY ENDPOINTS ==========
-// Add this function to your index.js
-const uploadToImageBB = async (imageBuffer, fileName) => {
-    const IMGBB_API_KEY = '32006f2a50e2265ea475805d6b074bf3'; // Your ImageBB API key
+    // ========== PHOTO GALLERY ENDPOINTS ==========
     
-    const formData = new FormData();
-    const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
-    formData.append('image', blob, fileName);
+    const uploadToImageBB = async (imageBuffer, fileName) => {
+      const IMGBB_API_KEY = '32006f2a50e2265ea475805d6b074bf3';
+      
+      const formData = new FormData();
+      const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
+      formData.append('image', blob, fileName);
 
-    try {
+      try {
         const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-            method: 'POST',
-            body: formData
+          method: 'POST',
+          body: formData
         });
 
         const data = await response.json();
         
         if (data.success) {
-            return data.data.url; // Returns ImageBB URL
+          return data.data.url;
         } else {
-            throw new Error(data.error?.message || 'ImageBB upload failed');
+          throw new Error(data.error?.message || 'ImageBB upload failed');
         }
-    } catch (error) {
+      } catch (error) {
         console.error('ImageBB upload error:', error);
         throw error;
-    }
-};
-// POST - Upload photo
-// Replace your current photo upload endpoint with this:
-app.post("/photos", upload.single("image"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).send({ 
-        success: false,
-        message: "No image uploaded" 
-      });
-    }
-
-    const { title, description, date } = req.body;
-
-    // Upload to ImageBB instead of local storage
-    const imageBuffer = fs.readFileSync(req.file.path);
-    const imageUrl = await uploadToImageBB(imageBuffer, req.file.originalname);
-
-    // Delete the local file after uploading to ImageBB
-    fs.unlinkSync(req.file.path);
-
-    const newPhoto = {
-      title,
-      description,
-      url: imageUrl, // This will be ImageBB URL
-      date: date ? new Date(date) : new Date(),
-      createdAt: new Date()
-    };
-
-    const result = await photoCollection.insertOne(newPhoto);
-    res.send({
-      success: true,
-      message: "Photo uploaded successfully to ImageBB",
-      data: { ...newPhoto, _id: result.insertedId }
-    });
-  } catch (error) {
-    console.error("Error uploading photo:", error);
-    
-    // Clean up local file if upload fails
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
-    res.status(500).send({ 
-      success: false,
-      message: "Error uploading photo to ImageBB" 
-    });
-  }
-});
-
-// GET - All photos
-app.get("/photos", async (req, res) => {
-  try {
-    const cursor = photoCollection.find().sort({ date: -1 });
-    const result = await cursor.toArray();
-    res.send(result);
-  } catch (error) {
-    console.error("Error fetching photos:", error);
-    res.status(500).send({ message: "Error fetching photos" });
-  }
-});
-
-// DELETE - Photo by ID
-app.delete("/photos/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
-
-    // Get photo data to delete associated image
-    const photo = await photoCollection.findOne(query);
-    if (photo && photo.url && photo.url.includes("/uploads/")) {
-      const filename = photo.url.split("/").pop();
-      const filePath = path.join(__dirname, "uploads", filename);
-
-      // Delete the image file
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
       }
-    }
-
-    const result = await photoCollection.deleteOne(query);
-    res.send({
-      success: true,
-      message: "Photo deleted successfully"
-    });
-  } catch (error) {
-    console.error("Error deleting photo:", error);
-    res.status(500).send({ message: "Error deleting photo" });
-  }
-});
-
-// ========== VIDEO GALLERY ENDPOINTS ==========
-// POST - Add video link
-app.post("/videos", async (req, res) => {
-  try {
-    const { title, description, youtubeUrl, date } = req.body;
-
-    if (!title || !youtubeUrl) {
-      return res.status(400).send({ 
-        success: false,
-        message: "Title and YouTube URL are required" 
-      });
-    }
-
-    const newVideo = {
-      title,
-      description,
-      youtubeUrl,
-      date: date ? new Date(date) : new Date(),
-      createdAt: new Date()
     };
 
-    const result = await videoCollection.insertOne(newVideo);
-    res.send({
-      success: true,
-      message: "Video added successfully",
-      data: { ...newVideo, _id: result.insertedId }
+    // POST - Upload photo
+    app.post("/photos", upload.single("image"), async (req, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).send({ 
+            success: false,
+            message: "No image uploaded" 
+          });
+        }
+
+        const { title, description, date } = req.body;
+
+        const imageBuffer = fs.readFileSync(req.file.path);
+        const imageUrl = await uploadToImageBB(imageBuffer, req.file.originalname);
+
+        fs.unlinkSync(req.file.path);
+
+        const newPhoto = {
+          title,
+          description,
+          url: imageUrl,
+          date: date ? new Date(date) : new Date(),
+          createdAt: new Date()
+        };
+
+        const result = await photoCollection.insertOne(newPhoto);
+        res.send({
+          success: true,
+          message: "Photo uploaded successfully to ImageBB",
+          data: { ...newPhoto, _id: result.insertedId }
+        });
+      } catch (error) {
+        console.error("Error uploading photo:", error);
+        
+        if (req.file && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+        
+        res.status(500).send({ 
+          success: false,
+          message: "Error uploading photo to ImageBB" 
+        });
+      }
     });
-  } catch (error) {
-    console.error("Error adding video:", error);
-    res.status(500).send({ 
-      success: false,
-      message: "Error adding video" 
+
+    // GET - All photos
+    app.get("/photos", async (req, res) => {
+      try {
+        const cursor = photoCollection.find().sort({ date: -1 });
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        console.error("Error fetching photos:", error);
+        res.status(500).send({ message: "Error fetching photos" });
+      }
     });
-  }
-});
 
-// GET - All videos
-app.get("/videos", async (req, res) => {
-  try {
-    const cursor = videoCollection.find().sort({ date: -1 });
-    const result = await cursor.toArray();
-    res.send(result);
-  } catch (error) {
-    console.error("Error fetching videos:", error);
-    res.status(500).send({ message: "Error fetching videos" });
-  }
-});
+    // DELETE - Photo by ID
+    app.delete("/photos/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
 
-// DELETE - Video by ID
-app.delete("/videos/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
-    const result = await videoCollection.deleteOne(query);
-    res.send({
-      success: true,
-      message: "Video deleted successfully"
+        const photo = await photoCollection.findOne(query);
+        if (photo && photo.url && photo.url.includes("/uploads/")) {
+          const filename = photo.url.split("/").pop();
+          const filePath = path.join(__dirname, "uploads", filename);
+
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        }
+
+        const result = await photoCollection.deleteOne(query);
+        res.send({
+          success: true,
+          message: "Photo deleted successfully"
+        });
+      } catch (error) {
+        console.error("Error deleting photo:", error);
+        res.status(500).send({ message: "Error deleting photo" });
+      }
     });
-  } catch (error) {
-    console.error("Error deleting video:", error);
-    res.status(500).send({ message: "Error deleting video" });
-  }
-});
 
-// This code goes INSIDE your index.js run() function
-// Add it after your other collections and before your existing routes
-
-// Form collections
-const formCollection = client.db("cusapDB").collection("forms");
-const responseCollection = client.db("cusapDB").collection("responses");
-
-// ========== FORM ADMIN ROUTES ==========
-
-// Create a new form
-// Create a new form
-app.post('/api/admin/forms', async (req, res) => {
-  try {
-    const form = {
-      ...req.body,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    const result = await formCollection.insertOne(form);
-    res.status(201).json({ ...form, _id: result.insertedId });
-  } catch (error) {
-    console.error("Error creating form:", error);
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Get all forms (admin)
-app.get('/api/admin/forms', async (req, res) => {
-  try {
-    const forms = await formCollection.find().sort({ createdAt: -1 }).toArray();
-    res.json(forms);
-  } catch (error) {
-    console.error("Error fetching forms:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get single form (admin)
-app.get('/api/admin/forms/:id', async (req, res) => {
-  try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid form ID' });
-    }
+    // ========== VIDEO GALLERY ENDPOINTS ==========
     
-    const form = await formCollection.findOne({ _id: new ObjectId(req.params.id) });
-    if (!form) return res.status(404).json({ error: 'Form not found' });
-    res.json(form);
-  } catch (error) {
-    console.error("Error fetching form:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+    // POST - Add video link
+    app.post("/videos", async (req, res) => {
+      try {
+        const { title, description, youtubeUrl, date } = req.body;
 
-// Update form
-app.put('/api/admin/forms/:id', async (req, res) => {
-  try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid form ID' });
-    }
-    
-    const result = await formCollection.findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: { ...req.body, updatedAt: new Date() } },
-      { returnDocument: 'after' }
-    );
-    
-    if (!result.value) return res.status(404).json({ error: 'Form not found' });
-    res.json(result.value);
-  } catch (error) {
-    console.error("Error updating form:", error);
-    res.status(400).json({ error: error.message });
-  }
-});
+        if (!title || !youtubeUrl) {
+          return res.status(400).send({ 
+            success: false,
+            message: "Title and YouTube URL are required" 
+          });
+        }
 
-// Delete form
-app.delete('/api/admin/forms/:id', async (req, res) => {
-  try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid form ID' });
-    }
-    
-    const result = await formCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: 'Form not found' });
-    }
-    res.json({ message: 'Form deleted successfully' });
-  } catch (error) {
-    console.error("Error deleting form:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+        const newVideo = {
+          title,
+          description,
+          youtubeUrl,
+          date: date ? new Date(date) : new Date(),
+          createdAt: new Date()
+        };
 
-// Get responses for a form
-app.get('/api/admin/forms/:id/responses', async (req, res) => {
-  try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid form ID' });
-    }
-    
-    const responses = await responseCollection
-      .find({ formId: req.params.id })
-      .sort({ submittedAt: -1 })
-      .toArray();
-    res.json(responses);
-  } catch (error) {
-    console.error("Error fetching responses:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ========== FORM PUBLIC ROUTES ==========
-
-// Get active form by ID (public)
-app.get('/api/public/forms/:id', async (req, res) => {
-  try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid form ID' });
-    }
-    
-    const form = await formCollection.findOne({ 
-      _id: new ObjectId(req.params.id), 
-      isActive: true 
+        const result = await videoCollection.insertOne(newVideo);
+        res.send({
+          success: true,
+          message: "Video added successfully",
+          data: { ...newVideo, _id: result.insertedId }
+        });
+      } catch (error) {
+        console.error("Error adding video:", error);
+        res.status(500).send({ 
+          success: false,
+          message: "Error adding video" 
+        });
+      }
     });
-    
-    if (!form) return res.status(404).json({ error: 'Form not found' });
-    res.json(form);
-  } catch (error) {
-    console.error("Error fetching form:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
-// Submit form response
-app.post('/api/public/forms/:id/submit', async (req, res) => {
-  try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid form ID' });
-    }
-    
-    const form = await formCollection.findOne({ 
-      _id: new ObjectId(req.params.id), 
-      isActive: true 
+    // GET - All videos
+    app.get("/videos", async (req, res) => {
+      try {
+        const cursor = videoCollection.find().sort({ date: -1 });
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        console.error("Error fetching videos:", error);
+        res.status(500).send({ message: "Error fetching videos" });
+      }
     });
-    
-    if (!form) return res.status(404).json({ error: 'Form not found' });
 
-    // Log to debug
-    console.log('Form questions:', form.questions.map(q => q._id));
-    console.log('Received answers:', req.body.answers);
+    // DELETE - Video by ID
+    app.delete("/videos/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await videoCollection.deleteOne(query);
+        res.send({
+          success: true,
+          message: "Video deleted successfully"
+        });
+      } catch (error) {
+        console.error("Error deleting video:", error);
+        res.status(500).send({ message: "Error deleting video" });
+      }
+    });
 
-    const response = {
-      formId: req.params.id,  // Store as string for easier querying
-      answers: req.body.answers,
-      submittedAt: new Date(),
-      ipAddress: req.ip
-    };
-    
-    const result = await responseCollection.insertOne(response);
-    console.log('Response saved:', result.insertedId);
-    
-    res.status(201).json({ 
-      message: 'Response submitted successfully',
-      responseId: result.insertedId 
+    // ========== FORM ADMIN ROUTES ==========
+
+    // Create a new form
+    app.post('/api/admin/forms', async (req, res) => {
+      try {
+        const form = {
+          ...req.body,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        const result = await formCollection.insertOne(form);
+        res.status(201).json({ ...form, _id: result.insertedId });
+      } catch (error) {
+        console.error("Error creating form:", error);
+        res.status(400).json({ error: error.message });
+      }
     });
-  } catch (error) {
-    console.error("Error submitting response:", error);
-    res.status(400).json({ error: error.message });
-  }
-});
-// DELETE - News by ID
-app.delete("/news/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
-    
-    const result = await newsCollection.deleteOne(query);
-    
-    if (result.deletedCount === 0) {
-      return res.status(404).send({ 
-        success: false,
-        message: "News not found" 
-      });
-    }
-    
-    res.send({
-      success: true,
-      message: "News deleted successfully"
+
+    // Get all forms (admin)
+    app.get('/api/admin/forms', async (req, res) => {
+      try {
+        const forms = await formCollection.find().sort({ createdAt: -1 }).toArray();
+        res.json(forms);
+      } catch (error) {
+        console.error("Error fetching forms:", error);
+        res.status(500).json({ error: error.message });
+      }
     });
-  } catch (error) {
-    console.error("Error deleting news:", error);
-    res.status(500).send({ 
-      success: false,
-      message: "Error deleting news" 
+
+    // Get single form (admin)
+    app.get('/api/admin/forms/:id', async (req, res) => {
+      try {
+        if (!ObjectId.isValid(req.params.id)) {
+          return res.status(400).json({ error: 'Invalid form ID' });
+        }
+        
+        const form = await formCollection.findOne({ _id: new ObjectId(req.params.id) });
+        if (!form) return res.status(404).json({ error: 'Form not found' });
+        res.json(form);
+      } catch (error) {
+        console.error("Error fetching form:", error);
+        res.status(500).json({ error: error.message });
+      }
     });
-  }
-});
-// index.js-এ যোগ করুন edit news
-app.put("/news/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const updatedNews = req.body;
-    
-    const result = await newsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: updatedNews }
-    );
-    
-    if (result.matchedCount === 0) {
-      return res.status(404).send({ 
-        success: false,
-        message: "News not found" 
-      });
-    }
-    
-    res.send({
-      success: true,
-      message: "News updated successfully"
+
+    // Update form
+    app.put('/api/admin/forms/:id', async (req, res) => {
+      try {
+        if (!ObjectId.isValid(req.params.id)) {
+          return res.status(400).json({ error: 'Invalid form ID' });
+        }
+        
+        const result = await formCollection.findOneAndUpdate(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { ...req.body, updatedAt: new Date() } },
+          { returnDocument: 'after' }
+        );
+        
+        if (!result.value) return res.status(404).json({ error: 'Form not found' });
+        res.json(result.value);
+      } catch (error) {
+        console.error("Error updating form:", error);
+        res.status(400).json({ error: error.message });
+      }
     });
-  } catch (error) {
-    console.error("Error updating news:", error);
-    res.status(500).send({ 
-      success: false,
-      message: "Error updating news" 
+
+    // Delete form
+    app.delete('/api/admin/forms/:id', async (req, res) => {
+      try {
+        if (!ObjectId.isValid(req.params.id)) {
+          return res.status(400).json({ error: 'Invalid form ID' });
+        }
+        
+        const result = await formCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ error: 'Form not found' });
+        }
+        res.json({ message: 'Form deleted successfully' });
+      } catch (error) {
+        console.error("Error deleting form:", error);
+        res.status(500).json({ error: error.message });
+      }
     });
-  }
-});
+
+    // Get responses for a form
+    app.get('/api/admin/forms/:id/responses', async (req, res) => {
+      try {
+        if (!ObjectId.isValid(req.params.id)) {
+          return res.status(400).json({ error: 'Invalid form ID' });
+        }
+        
+        const responses = await responseCollection
+          .find({ formId: req.params.id })
+          .sort({ submittedAt: -1 })
+          .toArray();
+        res.json(responses);
+      } catch (error) {
+        console.error("Error fetching responses:", error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // ========== FORM PUBLIC ROUTES ==========
+
+    // Get active form by ID (public)
+    app.get('/api/public/forms/:id', async (req, res) => {
+      try {
+        if (!ObjectId.isValid(req.params.id)) {
+          return res.status(400).json({ error: 'Invalid form ID' });
+        }
+        
+        const form = await formCollection.findOne({ 
+          _id: new ObjectId(req.params.id), 
+          isActive: true 
+        });
+        
+        if (!form) return res.status(404).json({ error: 'Form not found' });
+        res.json(form);
+      } catch (error) {
+        console.error("Error fetching form:", error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Submit form response
+    app.post('/api/public/forms/:id/submit', async (req, res) => {
+      try {
+        if (!ObjectId.isValid(req.params.id)) {
+          return res.status(400).json({ error: 'Invalid form ID' });
+        }
+        
+        const form = await formCollection.findOne({ 
+          _id: new ObjectId(req.params.id), 
+          isActive: true 
+        });
+        
+        if (!form) return res.status(404).json({ error: 'Form not found' });
+
+        console.log('Form questions:', form.questions.map(q => q._id));
+        console.log('Received answers:', req.body.answers);
+
+        const response = {
+          formId: req.params.id,
+          answers: req.body.answers,
+          submittedAt: new Date(),
+          ipAddress: req.ip
+        };
+        
+        const result = await responseCollection.insertOne(response);
+        console.log('Response saved:', result.insertedId);
+        
+        res.status(201).json({ 
+          message: 'Response submitted successfully',
+          responseId: result.insertedId 
+        });
+      } catch (error) {
+        console.error("Error submitting response:", error);
+        res.status(400).json({ error: error.message });
+      }
+    });
+
+    // ========== ERROR HANDLING ==========
+    app.use((error, req, res, next) => {
+      if (error instanceof multer.MulterError) {
+        if (error.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).send({ 
+            message: "File too large. Maximum size is 5MB." 
+          });
+        }
+      }
+      res.status(500).send({ message: error.message });
+    });
 
   } finally {
     // Ensures that the client will close when you finish/error
@@ -770,5 +753,5 @@ app.get("/", (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port: ${port}`);
+  console.log(`✓ Server is running on port: ${port}`);
 });
