@@ -249,6 +249,29 @@ async function run() {
       }
     });
 
+
+    //delete comment
+app.delete("/comment/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await commentCollection.deleteOne({ _id: new ObjectId(id) });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ 
+        success: false,
+        message: "Comment not found" 
+      });
+    }
+    
+    res.send({
+      success: true,
+      message: "Comment deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting comment:", error);
+    res.status(500).send({ message: "Error deleting comment" });
+  }
+});
     // ========== NEWS ENDPOINTS ==========
     
     // POST - Create new news article
